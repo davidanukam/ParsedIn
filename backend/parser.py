@@ -22,6 +22,7 @@ BACKEND_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = BACKEND_DIR.parent
 SESSION_PATH = BACKEND_DIR / ".linkedin_session.json"
 ENV_LOCAL_PATH = BACKEND_DIR / ".env.local"
+PROFILES_DIR = PROJECT_DIR / "profiles"
 
 load_dotenv(BACKEND_DIR / ".env")
 load_dotenv(PROJECT_DIR / ".env")
@@ -111,9 +112,9 @@ def print_available_commands() -> None:
     print(f"  {cmd} --login")
     print("      (save or update your LinkedIn email and password)")
     print(f"  {cmd} <profile_url>")
-    print("      (scrape a LinkedIn profile and print JSON)")
+    print("      (scrape a LinkedIn profile and save JSON under profiles/)")
     print(f"  {cmd} <profile_url> -o profile.json")
-    print("      (scrape a profile and save the JSON to a file)")
+    print("      (also copy the JSON to a custom file path)")
     print(f"  {cmd} --html test.html")
     print("      (parse a saved HTML file without logging in)")
     print(f"  {cmd} <profile_url> --no-details")
@@ -547,6 +548,25 @@ def normalize_profile_url(url: str) -> str:
     return match.group(1).rstrip("/")
 
 
+def profile_filename(url: str) -> str:
+    slug = normalize_profile_url(url).rsplit("/", 1)[-1]
+    slug = re.sub(r"[^A-Za-z0-9._-]", "_", slug).strip("._")
+    return f"{slug or 'profile'}.json"
+
+
+def save_profile_json(results: dict, url: str) -> Path:
+    PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        filename = profile_filename(url)
+    except ValueError:
+        name = str(results.get("name") or "profile")
+        filename = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._") + ".json"
+    path = PROFILES_DIR / filename
+    path.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
+    logger.info("Saved profile to %s", path)
+    return path
+
+
 def merge_profile(base: dict, extra: dict, key: str) -> None:
     if key == "about":
         incoming = extra.get("about") or ""
@@ -728,6 +748,90 @@ class LinkedInParser:
                 texts.append(text)
         return " ".join(texts)
 
+    def _uncheck_remember_me(self) -> None:
+        selectors = [
+            "#rememberMeOptIn-checkbox",
+            "#rememberMeOptIn",
+            "#rememberMe",
+            "input[name='rememberMeOptIn']",
+            "input[name='rememberMe']",
+            "input[name='remember']",
+            "input[id*='remember' i]",
+            "input[name*='remember' i]",
+            "form input[type='checkbox']",
+        ]
+        boxes = []
+        for selector in selectors:
+            boxes.extend(self.driver.find_elements(By.CSS_SELECTOR, selector))
+
+        for label in self.driver.find_elements(
+            By.XPATH,
+            "//label[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
+            "'abcdefghijklmnopqrstuvwxyz'), 'remember me') or "
+            "contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
+            "'abcdefghijklmnopqrstuvwxyz'), 'keep me logged in')]",
+        ):
+            try:
+                for_id = label.get_attribute("for")
+                if for_id:
+                    boxes.extend(self.driver.find_elements(By.ID, for_id))
+                boxes.extend(label.find_elements(By.CSS_SELECTOR, "input[type='checkbox']"))
+                label_text = (label.text or "").lower()
+                if "remember" in label_text or "keep me logged" in label_text:
+                    boxes.append(label)
+            except Exception:
+                continue
+
+        for toggle in self.driver.find_elements(By.CSS_SELECTOR, "[role='checkbox']"):
+            label = (
+                toggle.get_attribute("aria-label") or toggle.text or ""
+            ).lower()
+            if "remember" in label or "keep me logged" in label:
+                boxes.append(toggle)
+
+        seen: set[str] = set()
+        for box in boxes:
+            try:
+                key = box.id
+                if key in seen:
+                    continue
+                seen.add(key)
+                if box.tag_name.lower() == "input":
+                    self.driver.execute_script(
+                        """
+                        const el = arguments[0];
+                        if (!el) return;
+                        if (el.checked) {
+                            el.click();
+                        }
+                        if (el.checked) {
+                            el.checked = false;
+                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                            el.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                        """,
+                        box,
+                    )
+                elif box.get_attribute("aria-checked") == "true":
+                    self.driver.execute_script("arguments[0].click();", box)
+                elif box.tag_name.lower() == "label":
+                    self.driver.execute_script(
+                        """
+                        const label = arguments[0];
+                        const box = label.control || document.getElementById(label.htmlFor);
+                        if (box && box.checked) {
+                            label.click();
+                        }
+                        if (box && box.checked) {
+                            box.checked = false;
+                            box.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                        """,
+                        box,
+                    )
+            except Exception:
+                continue
+
     def _fill_input(self, element, value: str) -> None:
         element.click()
         element.send_keys(Keys.CONTROL + "a")
@@ -790,6 +894,7 @@ class LinkedInParser:
 
         self._fill_input(password_el, password)
         time.sleep(0.3)
+        self._uncheck_remember_me()
 
         submitted = False
         for button in self.driver.find_elements(By.CSS_SELECTOR, "button[type='submit']"):
@@ -899,8 +1004,8 @@ def main() -> None:
     parser.add_argument(
         "profile_url",
         nargs="?",
-        default="https://www.linkedin.com/in/davidlee-peng/",
-        help="LinkedIn profile URL",
+        default=None,
+        help="LinkedIn profile URL (required unless using --login)",
     )
     parser.add_argument(
         "--login",
@@ -931,6 +1036,9 @@ def main() -> None:
         print_available_commands()
         return
 
+    if not args.profile_url:
+        parser.error("profile_url is required")
+
     if args.html:
         results = parse_html_file(args.html, args.profile_url)
     else:
@@ -958,6 +1066,8 @@ def main() -> None:
 
     rendered = json.dumps(results, indent=2, ensure_ascii=False)
     print(rendered)
+    saved_to = save_profile_json(results, args.profile_url)
+    print(f"Saved profile to {saved_to}")
     if args.output:
         Path(args.output).write_text(rendered, encoding="utf-8")
         logger.info("Wrote %s", args.output)
