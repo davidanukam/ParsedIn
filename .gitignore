@@ -1,0 +1,6 @@
+# Testing
+*.html
+*.json
+
+# Profiles
+profiles/
