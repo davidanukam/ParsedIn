@@ -2,5 +2,6 @@
 
 *.env
 !.env.example
+.env.local
 .linkedin_session.json
 

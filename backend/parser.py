@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import logging
-import os
 import re
+import sys
 import time
 from pathlib import Path
 
@@ -15,12 +16,12 @@ from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 BACKEND_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = BACKEND_DIR.parent
 SESSION_PATH = BACKEND_DIR / ".linkedin_session.json"
+ENV_LOCAL_PATH = BACKEND_DIR / ".env.local"
 
 load_dotenv(BACKEND_DIR / ".env")
 load_dotenv(PROJECT_DIR / ".env")
@@ -29,6 +30,97 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+class LinkedInAuthError(RuntimeError):
+    """Raised when LinkedIn rejects a login or the login page cannot be used."""
+
+
+def cli_command() -> str:
+    return f"python {sys.argv[0]}"
+
+
+def env_quote(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def env_unquote(value: str) -> str:
+    text = value.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in {'"', "'"}:
+        inner = text[1:-1]
+        if text[0] == '"':
+            inner = inner.replace('\\"', '"').replace("\\\\", "\\")
+        return inner
+    return text
+
+
+def load_env_local() -> dict[str, str]:
+    if not ENV_LOCAL_PATH.exists():
+        return {}
+    values: dict[str, str] = {}
+    for line in ENV_LOCAL_PATH.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        values[key.strip()] = env_unquote(value)
+    return values
+
+
+def save_env_local(email: str, password: str) -> None:
+    values = load_env_local()
+    values["LINKEDIN_EMAIL"] = email
+    values["LINKEDIN_PASSWORD"] = password
+    values.pop("LINKEDIN_PASSWORD_HASH", None)
+    body = "".join(f"{key}={env_quote(value)}\n" for key, value in values.items())
+    ENV_LOCAL_PATH.write_text(body, encoding="utf-8")
+
+
+def saved_credentials() -> tuple[str, str] | None:
+    stored = load_env_local()
+    email = stored.get("LINKEDIN_EMAIL", "").strip()
+    password = stored.get("LINKEDIN_PASSWORD", "")
+    if email and password:
+        return email, password
+    return None
+
+
+def prompt_credentials() -> tuple[str, str]:
+    stored = load_env_local()
+    saved_email = stored.get("LINKEDIN_EMAIL", "").strip()
+
+    if saved_email:
+        entered = input(f"Email [{saved_email}]: ").strip()
+        email = entered or saved_email
+    else:
+        email = input("Email: ").strip()
+    while not email:
+        email = input("Email: ").strip()
+
+    while True:
+        password = getpass.getpass("Password: ")
+        if password:
+            return email, password
+        print("Password cannot be empty.")
+
+
+def print_available_commands() -> None:
+    cmd = cli_command()
+    print()
+    print("Available commands:")
+    print(f"  {cmd} --login")
+    print("      (save or update your LinkedIn email and password)")
+    print(f"  {cmd} <profile_url>")
+    print("      (scrape a LinkedIn profile and print JSON)")
+    print(f"  {cmd} <profile_url> -o profile.json")
+    print("      (scrape a profile and save the JSON to a file)")
+    print(f"  {cmd} --html test.html")
+    print("      (parse a saved HTML file without logging in)")
+    print(f"  {cmd} <profile_url> --no-details")
+    print("      (scrape only the main profile page, skip extra detail pages)")
+    print(f"  {cmd} <profile_url> --headless")
+    print("      (run Chrome in the background without a window)")
+
 
 MONTHS = (
     r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*"
@@ -89,6 +181,25 @@ USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
+LOGIN_EMAIL_SELECTORS = [
+    (By.ID, "username"),
+    (By.NAME, "session_key"),
+    (By.CSS_SELECTOR, "input[autocomplete='username']"),
+    (By.CSS_SELECTOR, "input[type='email']"),
+]
+LOGIN_PASSWORD_SELECTORS = [
+    (By.ID, "password"),
+    (By.NAME, "session_password"),
+    (By.CSS_SELECTOR, "input[type='password']"),
+]
+LOGIN_ERROR_SELECTORS = [
+    "#error-for-username",
+    "#error-for-password",
+    ".form__label--error",
+    ".alert-content",
+    "[role='alert']",
+    ".login__form .error",
+]
 
 
 def clean_text(value: str) -> str:
@@ -460,6 +571,13 @@ class LinkedInParser:
         self.options.add_argument(f"user-agent={USER_AGENT}")
         self.options.add_experimental_option("excludeSwitches", ["enable-automation"])
         self.options.add_experimental_option("useAutomationExtension", False)
+        self.options.add_experimental_option(
+            "prefs",
+            {
+                "credentials_enable_service": False,
+                "profile.password_manager_enabled": False,
+            },
+        )
         self.driver = None
 
     def start_driver(self) -> None:
@@ -467,7 +585,8 @@ class LinkedInParser:
             return
         try:
             self.driver = webdriver.Chrome(service=ChromeService(), options=self.options)
-            self.driver.implicitly_wait(5)
+            self.driver.implicitly_wait(0)
+            self.driver.set_page_load_timeout(60)
             self.driver.execute_cdp_cmd(
                 "Page.addScriptToEvaluateOnNewDocument",
                 {
@@ -580,62 +699,140 @@ class LinkedInParser:
             logger.warning("Could not reuse saved session: %s", exc)
         return False
 
-    def login(self, email: str | None = None, password: str | None = None) -> bool:
-        email = email or os.getenv("LINKEDIN_EMAIL", "").strip()
-        password = password or os.getenv("LINKEDIN_PASSWORD", "").strip()
+    def _first_visible(self, selectors: list[tuple], timeout: int = 25):
+        end = time.time() + timeout
+        while time.time() < end:
+            for by, value in selectors:
+                for element in self.driver.find_elements(by, value):
+                    try:
+                        if element.is_displayed():
+                            return element
+                    except Exception:
+                        continue
+            time.sleep(0.4)
+        raise TimeoutException(f"No visible element for {selectors[0]}")
+
+    def _read_login_errors(self) -> str:
+        soup = self.get_page_content()
+        texts: list[str] = []
+        for selector in LOGIN_ERROR_SELECTORS:
+            for node in soup.select(selector):
+                text = tag_text(node)
+                if text and text not in texts:
+                    texts.append(text)
+        for node in soup.find_all(
+            id=lambda value: bool(value) and str(value).startswith("error-for")
+        ):
+            text = tag_text(node)
+            if text and text not in texts:
+                texts.append(text)
+        return " ".join(texts)
+
+    def _fill_input(self, element, value: str) -> None:
+        element.click()
+        element.send_keys(Keys.CONTROL + "a")
+        element.send_keys(Keys.DELETE)
+        element.clear()
+        element.send_keys(value)
+
+    def login(self, email: str, password: str) -> None:
         if not self.driver:
             self.start_driver()
 
         if self._load_session():
-            return True
-
-        if not email or not password:
-            raise ValueError(
-                "Set LINKEDIN_EMAIL and LINKEDIN_PASSWORD in backend/.env before scraping."
-            )
+            return
 
         if not self.navigate_to_page("https://www.linkedin.com/login"):
-            return False
+            raise LinkedInAuthError("Could not open the LinkedIn login page.")
+
+        time.sleep(2)
+        self._dismiss_popups()
+        for selector in (
+            "#onetrust-accept-btn-handler",
+            "button[action-type='ACCEPT']",
+        ):
+            for button in self.driver.find_elements(By.CSS_SELECTOR, selector):
+                try:
+                    if button.is_displayed():
+                        button.click()
+                        time.sleep(0.5)
+                except Exception:
+                    continue
 
         try:
-            WebDriverWait(self.driver, 20).until(
-                EC.presence_of_element_located((By.ID, "username"))
-            )
-            email_el = self.driver.find_element(By.ID, "username")
-            password_el = self.driver.find_element(By.ID, "password")
-            email_el.clear()
-            email_el.send_keys(email)
-            password_el.clear()
-            password_el.send_keys(password)
+            email_el = self._first_visible(LOGIN_EMAIL_SELECTORS, timeout=30)
+        except TimeoutException as exc:
+            raise LinkedInAuthError(
+                "LinkedIn login form did not load. "
+                f"Current page: {self.driver.current_url}"
+            ) from exc
+
+        self._fill_input(email_el, email)
+        time.sleep(0.4)
+
+        try:
+            password_el = self._first_visible(LOGIN_PASSWORD_SELECTORS, timeout=8)
+        except TimeoutException:
+            for button in self.driver.find_elements(By.CSS_SELECTOR, "button[type='submit']"):
+                try:
+                    if button.is_displayed():
+                        button.click()
+                        break
+                except Exception:
+                    continue
+            try:
+                password_el = self._first_visible(LOGIN_PASSWORD_SELECTORS, timeout=15)
+            except TimeoutException as exc:
+                raise LinkedInAuthError(
+                    "LinkedIn password field did not load. "
+                    f"Current page: {self.driver.current_url}"
+                ) from exc
+
+        self._fill_input(password_el, password)
+        time.sleep(0.3)
+
+        submitted = False
+        for button in self.driver.find_elements(By.CSS_SELECTOR, "button[type='submit']"):
+            try:
+                if button.is_displayed():
+                    button.click()
+                    submitted = True
+                    break
+            except Exception:
+                continue
+        if not submitted:
             password_el.send_keys(Keys.RETURN)
-        except TimeoutException:
-            logger.error("LinkedIn login form did not load")
-            return False
 
-        try:
-            WebDriverWait(self.driver, 30).until(
-                lambda driver: any(
-                    part in driver.current_url
-                    for part in ("/feed", "/in/", "/checkpoint", "/challenge")
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            error = self._read_login_errors()
+            if error:
+                raise LinkedInAuthError(error)
+            url = self.driver.current_url.lower()
+            if "/checkpoint" in url or "/challenge" in url:
+                logger.warning(
+                    "LinkedIn is asking for a security check. Complete it in the open browser."
                 )
+                WebDriverWait(self.driver, 180).until(lambda driver: self._is_logged_in())
+                break
+            if self._is_logged_in():
+                break
+            time.sleep(0.5)
+        else:
+            error = self._read_login_errors()
+            raise LinkedInAuthError(
+                error
+                or f"LinkedIn login did not complete. Current page: {self.driver.current_url}"
             )
-        except TimeoutException:
-            logger.error("Login did not complete")
-            return False
-
-        if any(part in self.driver.current_url for part in ("/checkpoint", "/challenge")):
-            logger.warning(
-                "LinkedIn is asking for a security check. Complete it in the open browser."
-            )
-            WebDriverWait(self.driver, 180).until(lambda driver: self._is_logged_in())
 
         if not self._is_logged_in():
-            logger.error("Login failed. Check credentials or complete the security check.")
-            return False
+            error = self._read_login_errors()
+            raise LinkedInAuthError(
+                error or "LinkedIn login failed. Check your email and password."
+            )
 
         self._save_session()
         logger.info("Logged in to LinkedIn")
-        return True
 
     def _parse_current_page(self, url: str, only: str | None = None) -> dict:
         self._dismiss_popups()
@@ -658,9 +855,12 @@ class LinkedInParser:
         return self._parse_current_page(details_url, only=slug)
 
     def scrape_profile(self, profile_url: str, include_details: bool = True) -> dict:
+        creds = saved_credentials()
+        if not creds:
+            raise LinkedInAuthError("No user logged in.")
+
         url = normalize_profile_url(profile_url)
-        if not self.login():
-            raise RuntimeError("Could not log in to LinkedIn")
+        self.login(*creds)
 
         if not self.navigate_to_page(url):
             raise RuntimeError(f"Could not open {url}")
@@ -703,6 +903,11 @@ def main() -> None:
         help="LinkedIn profile URL",
     )
     parser.add_argument(
+        "--login",
+        action="store_true",
+        help="Save or update your LinkedIn email and password",
+    )
+    parser.add_argument(
         "--html",
         help="Parse a saved HTML file instead of opening Chrome",
     )
@@ -719,14 +924,35 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.login:
+        email, password = prompt_credentials()
+        save_env_local(email, password)
+        print("Login details saved successfully.")
+        print_available_commands()
+        return
+
     if args.html:
         results = parse_html_file(args.html, args.profile_url)
     else:
+        if not saved_credentials():
+            print(
+                "No user logged in. "
+                f"Run `{cli_command()} --login` to save your LinkedIn login details, then try again.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
         scraper = LinkedInParser(headless=args.headless)
         try:
             results = scraper.scrape_profile(
                 args.profile_url, include_details=not args.no_details
             )
+        except LinkedInAuthError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            print(
+                f"Run `{cli_command()} --login` to update your login details and try again.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
         finally:
             scraper.close_driver()
 

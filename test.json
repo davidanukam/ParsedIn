@@ -1,0 +1,128 @@
+{
+    "url": "https://www.linkedin.com/in/davidlee-peng",
+    "name": "David Lee, P.Eng",
+    "headline": "Full Stack Engineer/System Administrator, Faculty of Engineering at Western University",
+    "current_company": "Western University",
+    "location": "London, Ontario, Canada",
+    "photo_url": "https://media.licdn.com/dms/image/v2/D5603AQF5soL4KAxWpQ/profile-displayphoto-shrink_100_100/profile-displayphoto-shrink_100_100/0/1722354765490?e=1790208000&v=beta&t=BZ1UFWeSxA_QEFdw0W0UZ3OuWYDDKbzBFzNsHbHp1vA",
+    "followers": "187",
+    "about": "",
+    "experience": [
+        {
+            "company": "Western University",
+            "roles": [
+                {
+                    "employment_type": "Permanent Full-time",
+                    "dates": "Nov 2021 - Present",
+                    "duration": "4 yrs 11 mos",
+                    "title": "Full Stack Engineer/System Administrator",
+                    "company": "Western University"
+                },
+                {
+                    "dates": "Jan 2016 - Mar 2022",
+                    "duration": "6 yrs 3 mos",
+                    "title": "Solutions Specialist",
+                    "description": "Member of the Information Technology Group responsible for developing and supporting the tools and infrastructure used by faculty, staff and students. Focused on providing strategic direction on web based technologies to support the teaching, learning, research, and administrative needs of the Faculty of Engineering.",
+                    "company": "Western University"
+                }
+            ],
+            "duration": "10 yrs 9 mos"
+        },
+        {
+            "dates": "Sep 2015 - Dec 2021",
+            "duration": "6 yrs 4 mos",
+            "location": "London, Canada Metropolitan Area",
+            "title": "Consulting Engineer",
+            "company": "Red Pocket Solutions Inc.",
+            "description": "Red Pocket Solutions Inc. is a group of Engineers and IT professionals with a passion for design and technology that provides engineering, management and support services for businesses in need of professional quality driven results."
+        },
+        {
+            "dates": "Nov 2009 - Sep 2015",
+            "duration": "5 yrs 11 mos",
+            "title": "System Specialist",
+            "company": "University of Western Ontario",
+            "description": "An Associate Member of the National Centre for Audiology (NCA), reporting to the Director and responsible for assisting in the purchase decisions, maintenance and troubleshooting of network/server systems and computer systems for the NCA. Also responsible for managing self-contained projects that involve the designing, writing and implementing of software for researchers at the NCA, using up-to-date software engineering methods to ensure the quality of the software."
+        },
+        {
+            "dates": "Oct 2008 - May 2009",
+            "duration": "8 mos",
+            "title": "Technical Account Specialist",
+            "company": "Southwest Technology Group Inc.",
+            "description": "Architected hardware and software solutions that meet the vision and mission of Southwest Technology Group Inc. a subsidiary of Sun Microsystems of Canada Inc."
+        },
+        {
+            "dates": "Jan 2008 - Oct 2008",
+            "duration": "10 mos",
+            "title": "Software Engineer",
+            "company": "Bach-Simpson Corp.",
+            "description": "Working along side hardware engineers, delivered packaged hardware/software solutions meeting corporate and industry safety board objectives for locomotive event recorders (black boxes)."
+        },
+        {
+            "dates": "Jun 2007 - Dec 2007",
+            "duration": "7 mos",
+            "title": "Software Consultant",
+            "company": "Leed Software Development",
+            "description": "Served on consulting assignment for the London Public Library to design and develop user focused tools for use on public access machines for consumption within the London and area library system."
+        },
+        {
+            "dates": "Mar 2001 - Jun 2007",
+            "duration": "6 yrs 4 mos",
+            "title": "Lead Software Engineer",
+            "company": "Phoenix Interactive Design Inc.",
+            "description": "Coordinated with engineers, vendors and clients to successfully develop and manage all phases of software development on individual and team projects for customers located in Canada, U.S.A., New Zealand and Australia. Designed and integrated key software components into the core product to meet corporate objectives."
+        },
+        {
+            "dates": "Apr 1999 - Mar 2001",
+            "duration": "2 yrs",
+            "title": "Programmer Analyst",
+            "company": "Kellogg Canada Inc.",
+            "description": "Maintained computer automated machines vital to the production process for the entire North America. Performed upgrades and maintenance for plant legacy systems that control the manufacturing facility and provided 24/7 support for these systems."
+        }
+    ],
+    "education": [
+        {
+            "school": "Western University",
+            "degree": "BESc, Electrical Engineering"
+        }
+    ],
+    "certifications": [
+        {
+            "name": "P.Eng.",
+            "issuer": "Professional Engineers Ontario",
+            "details": "Skills: Possess strong analytical",
+            "credential_url": "https://www.linkedin.com/safety/go/?url=http%3A%2F%2Fwww%2Epeo%2Eon%2Eca&urlhash=JDi2&mt=-EfyNvr1i9ap2dUlshb-jbvLryNl0OXJyruyANyumVJ_dYcpCtJWiR5bYJuCxOfSDXynSK-fA6FjCw266EMw-3K8LXv3&isSdui=true"
+        }
+    ],
+    "skills": [
+        {
+            "name": "Coaching & Mentoring"
+        },
+        {
+            "name": "Strategic Thinking"
+        },
+        {
+            "name": "Firebase"
+        },
+        {
+            "name": "FinTech"
+        },
+        {
+            "name": "Enterprise Software"
+        },
+        {
+            "name": "Template Building"
+        },
+        {
+            "name": "Software Engineering Practices"
+        },
+        {
+            "name": "Defining Requirements"
+        },
+        {
+            "name": "Vue.js"
+        },
+        {
+            "name": "Skill Development"
+        }
+    ]
+}
